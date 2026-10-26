@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Loop } from "./model";
+import { currentAccount } from "./account";
 export const secret = () => randomBytes(32).toString("base64url");
 export const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 export function equal(a: string, b: string) {
@@ -43,6 +44,10 @@ export async function remember(id: string, token: string) {
   );
 }
 export async function memberFor(loop: Loop) {
+  const account = await currentAccount();
+  const signedIn =
+    account && loop.members.find((m) => m.accountId === account.id);
+  if (signedIn) return signedIn;
   const token = (await sessions())[loop.id];
   return token
     ? loop.members.find((m) => equal(m.tokenHash, hash(token)))

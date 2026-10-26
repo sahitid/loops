@@ -101,9 +101,10 @@ export default function Dashboard() {
         <div className="dashboard-note">
           <Users size={20} />
           <p>
-            <strong>Already part of a loop?</strong> Open the personal access
-            link you saved, or ask the owner for an invitation. Your loops stay
-            remembered in this browser.
+            <strong>Already part of a loop?</strong>{" "}
+            <Link href="/login">Sign in with your email</Link> to find your
+            groups on any device. You can also use your saved personal access
+            link.
           </p>
         </div>
       </main>

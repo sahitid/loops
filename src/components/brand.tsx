@@ -46,6 +46,9 @@ export function Header() {
         </Link>
       </nav>
       <div className="header-actions">
+        <Link href="/login" className="text-link">
+          Sign in
+        </Link>
         <Link href="/app" className="text-link">
           My loops
         </Link>

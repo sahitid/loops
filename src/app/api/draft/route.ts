@@ -7,8 +7,8 @@ export async function GET() {
   return Response.json({
     configured: Boolean(
       process.env.ANTHROPIC_API_KEY &&
-      (!process.env.ANTHROPIC_API_KEY.startsWith("sk-ant-usr-") ||
-        process.env.ANTHROPIC_WORKSPACE_ID),
+        (!process.env.ANTHROPIC_API_KEY.startsWith("sk-ant-usr-") ||
+          process.env.ANTHROPIC_WORKSPACE_ID),
     ),
     provider: "Claude",
   });

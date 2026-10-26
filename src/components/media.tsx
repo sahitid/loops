@@ -2,6 +2,7 @@
 import { useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { ImagePlus, X } from "lucide-react";
+import { demoAssets } from "@/lib/demo";
 import type { Media, PublicLoop } from "@/lib/model";
 import { request, Notice } from "./ui";
 export function MediaGrid({
@@ -19,7 +20,11 @@ export function MediaGrid({
         <figure className="media-item" key={m.id}>
           {m.type.startsWith("image/") ? (
             <img
-              src={`/api/media?loop=${loopId}&media=${m.id}`}
+              src={
+                loopId === "demo" && demoAssets[m.id]
+                  ? demoAssets[m.id]
+                  : `/api/media?loop=${loopId}&media=${m.id}`
+              }
               alt={m.name}
               loading="lazy"
             />
@@ -28,13 +33,21 @@ export function MediaGrid({
               controls
               preload="metadata"
               playsInline
-              src={`/api/media?loop=${loopId}&media=${m.id}`}
+              src={
+                loopId === "demo" && demoAssets[m.id]
+                  ? demoAssets[m.id]
+                  : `/api/media?loop=${loopId}&media=${m.id}`
+              }
             />
           ) : (
             <audio
               controls
               preload="metadata"
-              src={`/api/media?loop=${loopId}&media=${m.id}`}
+              src={
+                loopId === "demo" && demoAssets[m.id]
+                  ? demoAssets[m.id]
+                  : `/api/media?loop=${loopId}&media=${m.id}`
+              }
             />
           )}
           <figcaption>{m.name}</figcaption>

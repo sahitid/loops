@@ -2522,3 +2522,102 @@ legend {
     display: none;
   }
 }
+
+/* Email membership and sample camera-roll moments. */
+.email-enrollment,
+.email-strip {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  background: #eeeee4;
+  border: 1px solid #deded2;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 24px 0;
+}
+.email-enrollment > svg,
+.email-strip > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: #727760;
+}
+.email-enrollment p,
+.email-strip p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 7px 0;
+  color: #66665b;
+}
+.email-enrollment strong,
+.email-strip strong {
+  font-size: 14px;
+}
+.email-enrollment .checkbox-label {
+  margin: 12px 0 0;
+  font-size: 13px;
+}
+.email-strip > div {
+  flex: 1;
+}
+.email-strip small {
+  font-size: 11px;
+  color: #76766c;
+}
+.email-strip .text-link {
+  flex-shrink: 0;
+  font-size: 12px;
+}
+.email-invite {
+  padding: 10px 0 24px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e4ded5;
+}
+.paper-photos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 14px 0;
+}
+.paper-photos figure {
+  margin: 0;
+}
+.paper-photos img {
+  width: 100%;
+  height: 100px;
+  object-fit: cover;
+  border-radius: 3px;
+}
+.paper-photos figcaption {
+  font-size: 10px;
+  color: #777268;
+  margin-top: 4px;
+}
+.newsletter .media-grid {
+  grid-template-columns: 1fr;
+}
+.newsletter .media-item img {
+  height: auto;
+  max-height: 520px;
+  object-fit: cover;
+}
+.newsletter .media-item figcaption {
+  white-space: normal;
+  font-style: italic;
+}
+@media (max-width: 700px) {
+  .email-strip {
+    flex-wrap: wrap;
+  }
+  .email-strip > div {
+    flex-basis: 75%;
+  }
+  .header-actions {
+    gap: 12px;
+  }
+  .header-actions .text-link {
+    font-size: 12px;
+  }
+  .paper-photos img {
+    height: 80px;
+  }
+}

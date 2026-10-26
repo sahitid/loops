@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Check, Heart, MoveRight } from "lucide-react";
 import { Header } from "./brand";
 import { CopyLink, Loading, Notice, request } from "./ui";
+import { EmailEnrollment, useEmailAccount } from "./email-account";
 export default function JoinLoop({
   id,
   restore = false,
@@ -15,6 +16,8 @@ export default function JoinLoop({
   const router = useRouter();
   const [key, setKey] = useState("");
   const [error, setError] = useState("");
+  const account = useEmailAccount();
+  const [emailsEnabled, setEmailsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [access, setAccess] = useState("");
   const [name, setName] = useState("");
@@ -80,6 +83,7 @@ export default function JoinLoop({
                     id,
                     key,
                     name: new FormData(e.currentTarget).get("name"),
+                    emailsEnabled: Boolean(account.email && emailsEnabled),
                   });
                   history.replaceState(null, "", location.pathname);
                   if (r.accessKey) {
@@ -97,6 +101,11 @@ export default function JoinLoop({
                 A friend saved you a spot in their private newsletter. A few
                 stories, a little catching up, and a lot of connection.
               </p>
+              <EmailEnrollment
+                account={account}
+                enabled={emailsEnabled}
+                onChange={setEmailsEnabled}
+              />
               <label>
                 Your name
                 <input

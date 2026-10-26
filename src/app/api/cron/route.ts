@@ -1,7 +1,7 @@
-import { allLoopIds, readLoop, updateLoop } from "@/lib/storage";
-import { publishIssue } from "@/lib/model";
+import { allLoopIds, updateLoop } from "@/lib/storage";
+import { scheduleLoop, dispatchEmails } from "@/lib/mail-queue";
 import { equal } from "@/lib/auth";
-export const maxDuration = 60;
+export const maxDuration = 300;
 export async function GET(request: Request) {
   if (
     !process.env.CRON_SECRET ||
@@ -11,30 +11,32 @@ export async function GET(request: Request) {
     )
   )
     return new Response("Unauthorized", { status: 401 });
-  let published = 0;
-  let failed = 0;
-  for (const id of await allLoopIds()) {
+  let published = 0,
+    failed = 0,
+    emailsSent = 0;
+  const ids = await allLoopIds();
+  const deadline = Date.now() + 260000;
+  // Commit every due issue and its outbox before spending time on email delivery.
+  for (const id of ids) {
     try {
-      const saved = await readLoop(id);
-      if (
-        !saved ||
-        saved.loop.paused ||
-        Date.parse(saved.loop.nextDelivery) > Date.now()
-      )
-        continue;
-      const { result } = await updateLoop(id, (loop) => {
-        if (loop.paused || Date.parse(loop.nextDelivery) > Date.now())
-          return false;
-        if (publishIssue(loop)) return true;
-        loop.nextDelivery = new Date(
-          Date.now() + loop.frequency * 86400000,
-        ).toISOString();
-        return false;
-      });
+      const { result } = await updateLoop(id, (loop) => scheduleLoop(loop));
       if (result) published++;
     } catch {
       failed++;
     }
   }
-  return Response.json({ published, failed }, { status: failed ? 500 : 200 });
+  for (const id of ids) {
+    if (Date.now() > deadline - 16000) break;
+    try {
+      const result = await dispatchEmails(id, deadline);
+      emailsSent += result.sent;
+      failed += result.failed;
+    } catch {
+      failed++;
+    }
+  }
+  return Response.json(
+    { published, emailsSent, failed },
+    { status: failed ? 500 : 200 },
+  );
 }

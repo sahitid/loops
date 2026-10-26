@@ -1,16 +1,21 @@
 import { sameOrigin } from "@/lib/request";
 import { head } from "@vercel/blob";
-import { NextRequest } from "next/server";
+import { NextRequest, after } from "next/server";
 import { z } from "zod";
 import { createLoop, readLoop, updateLoop } from "@/lib/storage";
 import { equal, hash, memberFor, remember, secret, sessions } from "@/lib/auth";
+import { defaultQuestions, nextDelivery, type Loop } from "@/lib/model";
+import { currentAccount, addGroup } from "@/lib/account";
 import {
-  defaultQuestions,
-  publicLoop,
-  publishIssue,
-  type Loop,
-} from "@/lib/model";
+  dispatchEmails,
+  presentLoop as publicLoop,
+  publishAndQueue,
+  queueForms,
+  queueInvitation,
+} from "@/lib/mail-queue";
+import { emailConfigured } from "@/lib/email";
 export const runtime = "nodejs";
+export const maxDuration = 300;
 const text = (max: number) => z.string().trim().min(1).max(max);
 const id = z.string().uuid();
 const question = z.object({ id: text(60), text: text(300) });
@@ -22,8 +27,26 @@ const command = z.discriminatedUnion("action", [
     memberName: text(40),
     frequency: z.union([z.literal(7), z.literal(14), z.literal(30)]),
     color: z.enum(["peach", "sage", "lavender", "butter"]),
+    emailsEnabled: z.boolean().optional(),
   }),
-  z.object({ action: z.literal("join"), id, key: text(60), name: text(40) }),
+  z.object({
+    action: z.literal("join"),
+    id,
+    key: text(60),
+    name: text(40),
+    emailsEnabled: z.boolean().optional(),
+  }),
+  z.object({ action: z.literal("connect-email"), id, enabled: z.boolean() }),
+  z.object({
+    action: z.literal("email-preferences"),
+    id,
+    enabled: z.boolean(),
+  }),
+  z.object({
+    action: z.literal("invite-email"),
+    id,
+    email: z.string().trim().email().max(254),
+  }),
   z.object({ action: z.literal("restore"), id, key: text(60) }),
   z.object({
     action: z.literal("reply"),
@@ -76,7 +99,7 @@ export async function GET(req: NextRequest) {
         return json(
           {
             error:
-              "Open your personal access link or ask a friend for an invitation.",
+              "Sign in with the email you used to join, or open your personal access link.",
           },
           401,
         );
@@ -85,8 +108,15 @@ export async function GET(req: NextRequest) {
         accessKey: (await sessions())[target],
       });
     }
+    const account = await currentAccount();
+    const ids = [
+      ...new Set([
+        ...Object.keys(await sessions()),
+        ...(account?.groups || []),
+      ]),
+    ];
     const result = await Promise.all(
-      Object.keys(await sessions()).map(async (key) => {
+      ids.map(async (key) => {
         const saved = await readLoop(key);
         const me = saved && (await memberFor(saved.loop));
         return saved && me ? publicLoop(saved.loop, me) : null;
@@ -116,8 +146,11 @@ export async function POST(req: NextRequest) {
         400,
       );
     const data = parsed.data;
+    const account = await currentAccount();
     if (data.action === "create") {
-      if (Object.keys(await sessions()).length >= 15)
+      if (
+        (account?.groups.length || Object.keys(await sessions()).length) >= 15
+      )
         return json({ error: "This browser can keep up to 15 loops." }, 400);
       const token = secret();
       const member = {
@@ -125,6 +158,13 @@ export async function POST(req: NextRequest) {
         name: data.memberName,
         role: "owner" as const,
         tokenHash: hash(token),
+        ...(account
+          ? {
+              accountId: account.id,
+              email: account.email,
+              emailsEnabled: data.emailsEnabled ?? false,
+            }
+          : {}),
       };
       const loop: Loop = {
         id: crypto.randomUUID(),
@@ -132,9 +172,7 @@ export async function POST(req: NextRequest) {
         description: data.description,
         color: data.color,
         frequency: data.frequency,
-        nextDelivery: new Date(
-          Date.now() + data.frequency * 86400000,
-        ).toISOString(),
+        nextDelivery: nextDelivery(data.frequency),
         paused: false,
         createdAt: new Date().toISOString(),
         inviteKey: secret(),
@@ -147,8 +185,13 @@ export async function POST(req: NextRequest) {
         },
         issues: [],
       };
+      queueForms(loop);
+      if (account) await addGroup(account, loop.id);
       await createLoop(loop);
       await remember(loop.id, token);
+      after(async () => {
+        await dispatchEmails(loop.id, Date.now() + 240000);
+      });
       return json({ loop: publicLoop(loop, member), accessKey: token }, 201);
     }
     const saved = await readLoop(data.id);
@@ -178,16 +221,36 @@ export async function POST(req: NextRequest) {
         name: data.name,
         role: "member" as const,
         tokenHash: hash(token),
+        ...(account
+          ? {
+              accountId: account.id,
+              email: account.email,
+              emailsEnabled: data.emailsEnabled ?? false,
+            }
+          : {}),
       };
+      if (account) await addGroup(account, data.id);
       const updated = await updateLoop(data.id, (loop) => {
         if (!equal(loop.inviteKey, data.key))
           throw new Error("That invitation has expired.");
         if (loop.members.length >= 30)
           throw new Error("This loop has reached its 30-person limit.");
+        if (account && loop.members.some((m) => m.accountId === account.id))
+          return;
         loop.members.push(member);
+        queueForms(loop);
       });
-      await remember(data.id, token);
-      return json({ loop: publicLoop(updated.loop, member), accessKey: token });
+      const joined = account
+        ? updated.loop.members.find((m) => m.accountId === account.id)!
+        : member;
+      if (joined.id === member.id) await remember(data.id, token);
+      after(async () => {
+        await dispatchEmails(data.id, Date.now() + 240000);
+      });
+      return json({
+        loop: publicLoop(updated.loop, joined),
+        accessKey: joined.id === member.id ? token : undefined,
+      });
     }
     const me = await memberFor(saved.loop);
     if (!me)
@@ -196,10 +259,29 @@ export async function POST(req: NextRequest) {
         401,
       );
     if (
-      !["reply", "attach", "remove-media"].includes(data.action) &&
+      ![
+        "reply",
+        "attach",
+        "remove-media",
+        "connect-email",
+        "email-preferences",
+      ].includes(data.action) &&
       me.role !== "owner"
     )
       return json({ error: "Only the loop owner can make this change." }, 403);
+    if (data.action === "connect-email") {
+      if (!account)
+        return json({ error: "Sign in with your email first." }, 401);
+      await addGroup(account, data.id);
+    }
+    if (data.action === "invite-email" && (!account || !emailConfigured()))
+      return json(
+        {
+          error:
+            "Email invitations require a verified sender and email sign-in. You can still share the invitation link.",
+        },
+        503,
+      );
     let attachment:
       | {
           id: string;
@@ -299,21 +381,61 @@ export async function POST(req: NextRequest) {
           throw new Error("Question IDs must be unique.");
         loop.current.questions = data.questions;
       }
-      if (data.action === "publish" && !publishIssue(loop))
+      if (data.action === "publish" && !publishAndQueue(loop))
         throw new Error("At least one submitted reply is needed to publish.");
       if (data.action === "settings") {
         if (loop.frequency !== data.frequency)
-          loop.nextDelivery = new Date(
-            Date.now() + data.frequency * 86400000,
-          ).toISOString();
+          loop.nextDelivery = nextDelivery(data.frequency);
         loop.name = data.name;
         loop.description = data.description;
         loop.frequency = data.frequency;
         loop.paused = data.paused;
+        queueForms(loop);
       }
+      if (data.action === "connect-email" && account) {
+        if (
+          loop.members.some((m) => m.accountId === account.id && m.id !== me.id)
+        )
+          throw new Error("This loop already has a member using this email.");
+        const member = loop.members.find((m) => m.id === me.id)!;
+        if (member.accountId && member.accountId !== account.id)
+          throw new Error(
+            "This loop membership is already connected to another email.",
+          );
+        member.accountId = account.id;
+        member.email = account.email;
+        member.emailsEnabled = data.enabled;
+        queueForms(loop);
+      }
+      if (data.action === "email-preferences") {
+        const member = loop.members.find((m) => m.id === me.id)!;
+        if (!member.email)
+          throw new Error("This loop membership needs a verified email first.");
+        member.emailsEnabled = data.enabled;
+        queueForms(loop);
+      }
+      if (data.action === "invite-email")
+        queueInvitation(loop, data.email.toLowerCase(), me);
       if (data.action === "rotate-invite") loop.inviteKey = secret();
     });
-    return json({ loop: publicLoop(updated.loop, me) });
+    if (
+      [
+        "publish",
+        "invite-email",
+        "settings",
+        "connect-email",
+        "email-preferences",
+      ].includes(data.action)
+    )
+      after(async () => {
+        await dispatchEmails(data.id, Date.now() + 240000);
+      });
+    return json({
+      loop: publicLoop(
+        updated.loop,
+        updated.loop.members.find((m) => m.id === me.id)!,
+      ),
+    });
   } catch (e) {
     if (e instanceof SyntaxError)
       return json({ error: "Invalid request" }, 400);

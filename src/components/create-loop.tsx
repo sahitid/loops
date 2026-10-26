@@ -4,10 +4,13 @@ import Link from "next/link";
 import { ArrowLeft, Check, LockKeyhole, MoveRight } from "lucide-react";
 import { Flower, Header } from "./brand";
 import { CopyLink, Notice, request } from "./ui";
+import { EmailEnrollment, useEmailAccount } from "./email-account";
 export default function CreateLoop() {
   const [frequency, setFrequency] = useState(14);
   const [color, setColor] = useState("peach");
   const [error, setError] = useState("");
+  const account = useEmailAccount();
+  const [emailsEnabled, setEmailsEnabled] = useState(true);
   const [busy, setBusy] = useState(false);
   const [created, setCreated] = useState<{
     id: string;
@@ -46,8 +49,10 @@ export default function CreateLoop() {
               </div>
               <h2>Your loop is ready.</h2>
               <p>
-                Welcome to {created.name}. Before you go, save your personal
-                access link. It’s your key to this loop on another device.
+                Welcome to {created.name}.{" "}
+                {account.email
+                  ? `Sign in with ${account.email} to return on any device. You can also save a personal access link below.`
+                  : "Save your personal access link to return on another device. Connect your email from inside the loop when email setup is ready."}
               </p>
               <CopyLink
                 value={`${location.origin}/access/${created.id}#key=${created.key}`}
@@ -77,6 +82,7 @@ export default function CreateLoop() {
                     memberName: form.get("memberName"),
                     frequency,
                     color,
+                    emailsEnabled: Boolean(account.email && emailsEnabled),
                   });
                   setCreated({
                     id: r.loop.id,
@@ -92,6 +98,11 @@ export default function CreateLoop() {
             >
               <h2>Start a loop</h2>
               <p className="muted">A few details, then it’s yours.</p>
+              <EmailEnrollment
+                account={account}
+                enabled={emailsEnabled}
+                onChange={setEmailsEnabled}
+              />
               <label>
                 Your name
                 <input
@@ -127,7 +138,7 @@ export default function CreateLoop() {
                   {[
                     [7, "Weekly"],
                     [14, "Every 2 weeks"],
-                    [30, "Every 30 days"],
+                    [30, "Monthly"],
                   ].map(([n, label]) => (
                     <button
                       type="button"
@@ -140,8 +151,9 @@ export default function CreateLoop() {
                   ))}
                 </div>
                 <p className="field-help">
-                  Replies become an issue on your chosen rhythm. You can pause
-                  anytime.
+                  A fresh response form each cycle. A reminder two days before
+                  the deadline. Everyone’s submitted stories in one newsletter.
+                  Pause anytime.
                 </p>
               </fieldset>
               <fieldset>
@@ -167,7 +179,8 @@ export default function CreateLoop() {
                 <MoveRight size={18} />
               </button>
               <p className="form-footnote">
-                No password to remember. Just a personal access link.
+                Private groups. Email sign-in when connected, or a personal
+                access link.
               </p>
             </form>
           )}

@@ -64,6 +64,15 @@ export const demoLoop: PublicLoop = {
             q2: "Thinking about signing up for a half marathon. Someone please hold me to this.",
             q3: "A weekend in the mountains. No notifications allowed.",
           },
+          media: [
+            {
+              id: "demo-lake",
+              pathname: "demo/lake.jpg",
+              name: "A little mountain air. Wish you were here.",
+              type: "image/jpeg",
+              size: 0,
+            },
+          ],
           submitted: true,
           updatedAt: "2026-10-25",
         },
@@ -72,6 +81,15 @@ export const demoLoop: PublicLoop = {
             q1: "My first successful loaf of bread! Only took six attempts.",
             q2: "How to keep my plants alive while I travel. Applications for plant godparents are open.",
           },
+          media: [
+            {
+              id: "demo-bread",
+              pathname: "demo/bread.jpg",
+              name: "Attempt number six. Finally got the crust right!",
+              type: "image/jpeg",
+              size: 0,
+            },
+          ],
           submitted: true,
           updatedAt: "2026-10-25",
         },
@@ -86,4 +104,9 @@ export const demoLoop: PublicLoop = {
       },
     },
   ],
+};
+
+export const demoAssets: Record<string, string> = {
+  "demo-lake": "/demo/lake.jpg",
+  "demo-bread": "/demo/bread.jpg",
 };

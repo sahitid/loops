@@ -108,6 +108,19 @@ export default function Home() {
                   </p>
                 </div>
               </div>
+              <div className="paper-photos">
+                <figure>
+                  <img
+                    src="/demo/bread.jpg"
+                    alt="Jules’ homemade sourdough bread"
+                  />
+                  <figcaption>Jules’ small victory 🍞</figcaption>
+                </figure>
+                <figure>
+                  <img src="/demo/lake.jpg" alt="Alex’s mountain lake trip" />
+                  <figcaption>A little mountain air 🌿</figcaption>
+                </figure>
+              </div>
               <div className="paper-bottom">
                 A little piece of everyone, in one place. <Heart size={12} />
               </div>

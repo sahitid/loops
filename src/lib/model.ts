@@ -18,6 +18,31 @@ export type Member = {
   name: string;
   role: "owner" | "member";
   tokenHash: string;
+  accountId?: string;
+  email?: string;
+  emailsEnabled?: boolean;
+};
+export type EmailJob = {
+  id: string;
+  kind: "form" | "reminder" | "newsletter" | "invitation";
+  issueId: string;
+  memberId?: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  createdAt: string;
+  status: "pending" | "sending" | "sent" | "cancelled" | "failed";
+  dueAt?: string;
+  sentAt?: string;
+  attempts: number;
+  firstAttemptAt?: string;
+  uncertain?: boolean;
+  nextAttemptAt?: string;
+  leaseUntil?: string;
+  claim?: string;
+  providerId?: string;
+  error?: string;
 };
 export type Issue = {
   questionsLocked?: boolean;
@@ -42,11 +67,24 @@ export type Loop = {
   current: Issue;
   issues: Issue[];
   aiUsage?: Record<string, { day: string; count: number }>;
+  outbox?: EmailJob[];
 };
-export type PublicLoop = Omit<Loop, "members" | "inviteKey" | "aiUsage"> & {
-  members: Omit<Member, "tokenHash">[];
+export type PublicLoop = Omit<
+  Loop,
+  "members" | "inviteKey" | "aiUsage" | "outbox"
+> & {
+  members: Pick<Member, "id" | "name" | "role">[];
   me: string;
   inviteKey?: string;
+  myEmail?: string;
+  emailsEnabled?: boolean;
+  emailStatus?: {
+    configured: boolean;
+    subscribed: number;
+    pending: number;
+    sent: number;
+    failed: number;
+  };
 };
 export const prompts = [
   {
@@ -102,12 +140,14 @@ export function defaultQuestions(offset = 0): Question[] {
   }));
 }
 export function publicLoop(loop: Loop, member: Member): PublicLoop {
-  const { aiUsage: _usage, ...safe } = loop;
+  const { aiUsage: _usage, outbox: _outbox, ...safe } = loop;
   return {
     ...safe,
     inviteKey: member.role === "owner" ? loop.inviteKey : undefined,
-    members: loop.members.map(({ tokenHash: _secret, ...m }) => m),
+    members: loop.members.map(({ id, name, role }) => ({ id, name, role })),
     me: member.id,
+    myEmail: member.email,
+    emailsEnabled: Boolean(member.email && member.emailsEnabled),
     current: {
       ...loop.current,
       questionsLocked: Object.values(loop.current.replies).some(
@@ -154,8 +194,20 @@ export function publishIssue(loop: Loop, now = new Date()): boolean {
     questions: defaultQuestions(loop.current.number * 3),
     replies: {},
   };
-  loop.nextDelivery = new Date(
-    now.getTime() + loop.frequency * 86400000,
-  ).toISOString();
+  loop.nextDelivery = nextDelivery(loop.frequency, now);
   return true;
+}
+export function nextDelivery(frequency: number, from = new Date()): string {
+  const next = new Date(from);
+  if (frequency === 30) {
+    const day = next.getUTCDate();
+    next.setUTCDate(1);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const last = new Date(
+      Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0),
+    ).getUTCDate();
+    next.setUTCDate(Math.min(day, last));
+  } else next.setUTCDate(next.getUTCDate() + frequency);
+  next.setUTCHours(16, 0, 0, 0);
+  return next.toISOString();
 }

@@ -34,6 +34,7 @@ import {
   type Question,
 } from "@/lib/model";
 import { demoLoop } from "@/lib/demo";
+import { useEmailAccount } from "./email-account";
 import VoiceNote from "./voice-note";
 import MediaUploader, { MediaGrid, uploadMedia } from "./media";
 type Tab = "current" | "archive" | "people" | "settings";
@@ -47,6 +48,7 @@ export default function LoopApp({
   const [loop, setLoop] = useState<PublicLoop | null>(
     demo ? structuredClone(demoLoop) : null,
   );
+  const account = useEmailAccount();
   const [loading, setLoading] = useState(!demo);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -59,7 +61,9 @@ export default function LoopApp({
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [access, setAccess] = useState("");
-  const [issue, setIssue] = useState<Issue | null>(null);
+  const [issue, setIssue] = useState<Issue | null>(
+    demo ? structuredClone(demoLoop.issues[0]) : null,
+  );
   const [editorQuestions, setEditorQuestions] = useState<Question[]>([]);
   const [search, setSearch] = useState("");
   const [custom, setCustom] = useState("");
@@ -71,12 +75,12 @@ export default function LoopApp({
       setStory(data.current.replies[data.me]?.story || "");
       setDirty(false);
     }
-    if (demo) localStorage.setItem("loops-demo-v1", JSON.stringify(data));
+    if (demo) localStorage.setItem("loops-demo-v2", JSON.stringify(data));
   }
   useEffect(() => {
     if (demo) {
       try {
-        const stored = localStorage.getItem("loops-demo-v1");
+        const stored = localStorage.getItem("loops-demo-v2");
         if (stored) {
           const d = JSON.parse(stored);
           if (d.id === "demo" && d.current && Array.isArray(d.members))
@@ -91,6 +95,14 @@ export default function LoopApp({
         if (!r.ok) throw new Error(d.error);
         apply(d.loop, true);
         setAccess(d.accessKey || "");
+        const params = new URLSearchParams(location.search);
+        if (params.get("issue"))
+          setIssue(
+            d.loop.issues.find((i: Issue) => i.id === params.get("issue")) ||
+              null,
+          );
+        if (params.get("form") && params.get("form") !== d.loop.current.id)
+          setNotice("That issue has closed. Here’s your newest response form.");
       })
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
@@ -165,8 +177,11 @@ export default function LoopApp({
         <Header />
         <main className="narrow-page">
           <Notice>{error || "This loop couldn’t be found."}</Notice>
-          <Link href="/app" className="button">
-            Back to your loops
+          <Link
+            href={`/login#next=${encodeURIComponent(`/loop/${id}${typeof location !== "undefined" ? location.search : ""}`)}`}
+            className="button"
+          >
+            Sign in to your loop
           </Link>
         </main>
       </>
@@ -261,7 +276,7 @@ export default function LoopApp({
                 )}
               </button>
             ))}
-          {!demo && (
+          {!demo && access && (
             <button className="personal-key" onClick={() => setModal("access")}>
               <KeyRound size={15} />
               <span>Your access key</span>
@@ -275,6 +290,75 @@ export default function LoopApp({
           </div>
         )}
         {error && <Notice>{error}</Notice>}
+        {!demo && (
+          <section className="email-strip">
+            <Mail size={21} />
+            <div>
+              <strong>
+                {loop.emailsEnabled
+                  ? "Your loop, delivered to your inbox."
+                  : "Make this a little ritual."}
+              </strong>
+              <p>
+                {!loop.emailStatus?.configured
+                  ? "Email delivery is waiting for a verified sender. Your group and response forms are ready to use here."
+                  : loop.myEmail
+                    ? `Forms, reminders and newsletters ${loop.emailsEnabled ? "go to" : "are turned off for"} ${loop.myEmail}.`
+                    : "Connect your email to receive each new form, a reminder, and the finished newsletter."}
+              </p>
+              {loop.emailStatus?.configured && owner && (
+                <small>
+                  {loop.emailStatus.subscribed} subscribed ·{" "}
+                  {loop.emailStatus.pending} queued · {loop.emailStatus.sent}{" "}
+                  accepted by email provider
+                  {loop.emailStatus.failed
+                    ? ` · ${loop.emailStatus.failed} need attention`
+                    : ""}
+                </small>
+              )}
+            </div>
+            {loop.myEmail ? (
+              <button
+                className="text-link"
+                disabled={busy}
+                onClick={async () => {
+                  if (
+                    await mutate("email-preferences", {
+                      enabled: !loop.emailsEnabled,
+                    })
+                  )
+                    setNotice(
+                      loop.emailsEnabled
+                        ? "Emails turned off for this loop."
+                        : "Recurring emails enabled.",
+                    );
+                }}
+              >
+                {loop.emailsEnabled ? "Turn off emails" : "Turn on emails"}
+              </button>
+            ) : account.email ? (
+              <button
+                className="button button-small"
+                disabled={busy}
+                onClick={async () => {
+                  if (await mutate("connect-email", { enabled: true }))
+                    setNotice(
+                      "Your email is connected. Forms and newsletters will arrive in your inbox.",
+                    );
+                }}
+              >
+                Connect {account.email}
+              </button>
+            ) : loop.emailStatus?.configured ? (
+              <Link
+                href={`/login#next=${encodeURIComponent(`/loop/${id}`)}`}
+                className="button button-small"
+              >
+                Connect my email
+              </Link>
+            ) : null}
+          </section>
+        )}
         {issue ? (
           <article className="newsletter">
             <div className="newsletter-toolbar">
@@ -556,7 +640,7 @@ export default function LoopApp({
                 <p>
                   {loop.paused
                     ? "Your owner can resume the schedule in Settings."
-                    : `A new issue every ${loop.frequency} days. Published here for your people.`}
+                    : `A new issue ${loop.frequency === 30 ? "every month" : `every ${loop.frequency} days`}. A fresh response form opens after publication.`}
                 </p>
                 <div className="progress-track">
                   <div
@@ -606,7 +690,11 @@ export default function LoopApp({
                 </p>
               </div>
               <p className="delivery-note">
-                Issues publish on the web. Email delivery isn’t enabled.
+                {demo
+                  ? "Your real loop can email new forms, reminders and newsletters to your people."
+                  : loop.emailStatus?.configured
+                    ? "Forms arrive when each issue opens. Reminders go to people who haven’t submitted, two days before publication. Only submitted updates are shared."
+                    : "Your group works here now. Recurring emails start after a sender is connected and members enable email."}
               </p>
             </aside>
           </div>
@@ -733,7 +821,7 @@ export default function LoopApp({
                 <select name="frequency" defaultValue={loop.frequency}>
                   <option value={7}>Every week</option>
                   <option value={14}>Every two weeks</option>
-                  <option value={30}>Every 30 days</option>
+                  <option value={30}>Every month</option>
                 </select>
               </label>
               <label className="checkbox-label">
@@ -742,11 +830,12 @@ export default function LoopApp({
                   name="paused"
                   defaultChecked={loop.paused}
                 />
-                Pause automatic publication
+                Pause the schedule and recurring emails
               </label>
               <p className="field-help">
-                Changing your rhythm schedules the next issue from today. The
-                daily publication check runs at 16:00 UTC.
+                Changing your rhythm schedules the next issue from today. Forms
+                and reminders are automatic. Publication runs daily at 16:00
+                UTC; monthly schedules use calendar months.
               </p>
               <button className="button" disabled={busy}>
                 <Save size={16} />
@@ -776,6 +865,46 @@ export default function LoopApp({
             </>
           ) : (
             <>
+              <form
+                className="email-invite"
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const form = e.currentTarget;
+                  if (
+                    await mutate("invite-email", {
+                      email: new FormData(form).get("email"),
+                    })
+                  ) {
+                    form.reset();
+                    setNotice("Invitation queued for email delivery.");
+                  }
+                }}
+              >
+                <label>
+                  Invite by email
+                  <input
+                    type="email"
+                    name="email"
+                    required
+                    maxLength={254}
+                    placeholder="your.friend@example.com"
+                  />
+                </label>
+                <button
+                  disabled={
+                    busy || !loop.emailStatus?.configured || !account.email
+                  }
+                  className="button full-width"
+                >
+                  <Mail size={17} /> Send invitation
+                </button>
+                {(!loop.emailStatus?.configured || !account.email) && (
+                  <p className="field-help">
+                    Email invitations need a connected sender and email sign-in.
+                    Share the private link below in the meantime.
+                  </p>
+                )}
+              </form>
               <CopyLink
                 value={`${location.origin}/join/${loop.id}#key=${loop.inviteKey}`}
               />
