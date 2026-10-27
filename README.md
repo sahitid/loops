@@ -38,6 +38,7 @@ Without Blob credentials, group records use the ignored `.data/` directory local
 | `ANTHROPIC_MODEL`        | Optional; defaults to `claude-sonnet-5-5`.                                                                   |
 | `EMAIL_PROVIDER`         | `gmail` or `resend` (default).                                                                              |
 | `GMAIL_USER`             | Sending Google account's email address, used when the provider is `gmail`.                                    |
+| `GMAIL_FROM_ADDRESS`     | Optional Gmail Send mail as address, including a plus-address; also used for replies. Defaults to `GMAIL_USER`. |
 | `GMAIL_APP_PASSWORD`     | Server-only Google app password for that account, used when the provider is `gmail`.                         |
 | `RESEND_API_KEY`         | Server-only key for the verified Resend sender; used only by `resend`.                                        |
 | `EMAIL_FROM`             | Verified Resend sender, e.g. `Loops <hello@loops.yourdomain.com>`; Gmail uses `Loops <GMAIL_USER>`.             |
@@ -48,6 +49,8 @@ Without Blob credentials, group records use the ignored `.data/` directory local
 Keep secrets in ignored `.env.local` and Vercel environment settings. Never use `NEXT_PUBLIC_` for credentials. Never commit real credentials.
 
 For Gmail, create or choose the sending account, enable [Google 2-Step Verification and app passwords](https://support.google.com/accounts/answer/185833), then save `EMAIL_PROVIDER=gmail`, `GMAIL_USER`, and `GMAIL_APP_PASSWORD` in the Vercel project's Production environment settings and redeploy. Enter the app password directly in Vercel as a sensitive variable; do not use the account's regular password. Some managed or protected Google accounts do not allow app passwords. Login codes, invitations, forms, reminders, and newsletters all use the selected sender. Gmail's [sending limits](https://support.google.com/mail/answer/22839) apply to the whole account, including its other mail.
+
+To send from a plus-address, keep `GMAIL_USER` set to the base account and set `GMAIL_FROM_ADDRESS` to the plus-address. Add that address under Gmail's [Send mail as settings](https://support.google.com/mail/answer/22370) so Google preserves the From address. Replies go to the plus-address, which can be sorted with a Gmail label and filter.
 
 The publication check runs once daily at 16:00 UTC. Submitted replies are included; drafts are excluded. Empty due issues advance their delivery date without publishing. Manual publication starts a fresh cycle. Private access links are bearer credentials: save them somewhere safe and do not share them. The browser remembers up to 15 loop memberships. Members who connect a verified email can sign in from any device. Unlinked memberships still require their personal access links. Members cannot view each other's unfinished replies or attachments. Owner invitation links can be rotated.
 

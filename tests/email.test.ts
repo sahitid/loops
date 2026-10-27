@@ -250,6 +250,7 @@ test("provider requests include idempotency key; errors never become successful 
 test("Gmail sends through authenticated TLS and preserves newsletter content without requiring a domain", async () => {
   process.env.EMAIL_PROVIDER = "gmail";
   process.env.GMAIL_USER = "loops-test@gmail.com";
+  process.env.GMAIL_FROM_ADDRESS = "loops-test+letters@gmail.com";
   process.env.GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop";
   const originalCreate = nodemailer.createTransport;
   const captured: Buffer[] = [];
@@ -280,12 +281,15 @@ test("Gmail sends through authenticated TLS and preserves newsletter content wit
     assert.ok(captured[0].toString().includes("multipart/alternative"));
     assert.ok(captured[0].toString().includes("Hello from our loop"));
     assert.ok(captured[0].toString().includes("https://loops.example.test/photo"));
+    assert.ok(captured[0].toString().includes("From: Loops <loops-test+letters@gmail.com>"));
+    assert.ok(captured[0].toString().includes("Reply-To: Loops <loops-test+letters@gmail.com>"));
     delete process.env.GMAIL_APP_PASSWORD;
     assert.equal(emailConfigured(), false);
   } finally {
     intercepted.mock.restore();
     delete process.env.EMAIL_PROVIDER;
     delete process.env.GMAIL_USER;
+    delete process.env.GMAIL_FROM_ADDRESS;
     delete process.env.GMAIL_APP_PASSWORD;
   }
 });

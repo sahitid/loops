@@ -8,8 +8,10 @@ export function emailProvider(): "gmail" | "resend" | null {
 }
 export function emailConfigured() {
   const provider = emailProvider();
+  const validAddress = (address: string) => /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(address);
   const senderReady = provider === "gmail"
-    ? /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(process.env.GMAIL_USER || "") &&
+    ? validAddress(process.env.GMAIL_USER || "") &&
+      validAddress(process.env.GMAIL_FROM_ADDRESS || process.env.GMAIL_USER || "") &&
       (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "").length === 16
     : provider === "resend" && process.env.RESEND_API_KEY && process.env.EMAIL_FROM;
   return Boolean(
@@ -60,6 +62,7 @@ export async function sendEmail(mail: Mail, id: string) {
 
 async function sendGmail(mail: Mail, id: string) {
   const user = process.env.GMAIL_USER!;
+  const sender = process.env.GMAIL_FROM_ADDRESS || user;
   const transport = nodemailer.createTransport({
     host: "smtp.gmail.com",
     port: 465,
@@ -77,7 +80,9 @@ async function sendGmail(mail: Mail, id: string) {
   try {
     const result = await Promise.race([
       transport.sendMail({
-        from: { name: "Loops", address: user },
+        from: { name: "Loops", address: sender },
+        replyTo: { name: "Loops", address: sender },
+        envelope: { from: user, to: [mail.to] },
         to: { address: mail.to, name: "" },
         subject: mail.subject,
         html: mail.html,
