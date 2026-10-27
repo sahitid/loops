@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import nodemailer from "nodemailer";
 
 export type Mail = { to: string; subject: string; html: string; text: string };
+let reportedConfiguration = false;
 export function emailProvider(): "gmail" | "resend" | null {
   const provider = process.env.EMAIL_PROVIDER || "resend";
   return provider === "gmail" || provider === "resend" ? provider : null;
@@ -14,11 +15,27 @@ export function emailConfigured() {
       validAddress(process.env.GMAIL_FROM_ADDRESS || process.env.GMAIL_USER || "") &&
       (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "").length === 16
     : provider === "resend" && process.env.RESEND_API_KEY && process.env.EMAIL_FROM;
-  return Boolean(
+  const configured = Boolean(
     senderReady &&
       (process.env.AUTH_SECRET?.length || 0) >= 32 &&
       process.env.APP_URL,
   );
+  if (!configured && process.env.VERCEL && !reportedConfiguration) {
+    reportedConfiguration = true;
+    // Log only validity flags, never addresses, passwords, or secret values.
+    console.warn("Email configuration incomplete", {
+      provider: provider || "invalid",
+      gmailUserValid: validAddress(process.env.GMAIL_USER || ""),
+      gmailSenderValid: validAddress(process.env.GMAIL_FROM_ADDRESS || process.env.GMAIL_USER || ""),
+      gmailPasswordPresent: Boolean(process.env.GMAIL_APP_PASSWORD),
+      gmailPasswordFormatValid: (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "").length === 16,
+      resendKeyPresent: Boolean(process.env.RESEND_API_KEY),
+      resendSenderPresent: Boolean(process.env.EMAIL_FROM),
+      signingSecretValid: (process.env.AUTH_SECRET?.length || 0) >= 32,
+      appUrlPresent: Boolean(process.env.APP_URL),
+    });
+  }
+  return configured;
 }
 export const appUrl = () =>
   (process.env.APP_URL || "https://loops-sand.vercel.app").replace(/\/$/, "");
