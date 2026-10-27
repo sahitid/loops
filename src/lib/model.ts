@@ -37,6 +37,7 @@ export type EmailJob = {
   sentAt?: string;
   attempts: number;
   firstAttemptAt?: string;
+  deliveryProvider?: "gmail" | "resend";
   uncertain?: boolean;
   nextAttemptAt?: string;
   leaseUntil?: string;

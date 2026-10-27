@@ -1,9 +1,20 @@
+import { createHash } from "node:crypto";
+import nodemailer from "nodemailer";
+
 export type Mail = { to: string; subject: string; html: string; text: string };
+export function emailProvider(): "gmail" | "resend" | null {
+  const provider = process.env.EMAIL_PROVIDER || "resend";
+  return provider === "gmail" || provider === "resend" ? provider : null;
+}
 export function emailConfigured() {
+  const provider = emailProvider();
+  const senderReady = provider === "gmail"
+    ? /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(process.env.GMAIL_USER || "") &&
+      (process.env.GMAIL_APP_PASSWORD || "").replace(/\s/g, "").length === 16
+    : provider === "resend" && process.env.RESEND_API_KEY && process.env.EMAIL_FROM;
   return Boolean(
-    process.env.RESEND_API_KEY &&
-      process.env.EMAIL_FROM &&
-      process.env.AUTH_SECRET?.length &&
+    senderReady &&
+      (process.env.AUTH_SECRET?.length || 0) >= 32 &&
       process.env.APP_URL,
   );
 }
@@ -13,12 +24,14 @@ export class EmailError extends Error {
   constructor(
     public status: number,
     public retryable: boolean,
+    public uncertain = status >= 500,
   ) {
     super(`Email service returned ${status}`);
   }
 }
 export async function sendEmail(mail: Mail, id: string) {
   if (!emailConfigured()) throw new EmailError(503, true);
+  if (emailProvider() === "gmail") return sendGmail(mail, id);
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -43,6 +56,59 @@ export async function sendEmail(mail: Mail, id: string) {
   const result = await response.json();
   if (typeof result.id !== "string") throw new Error("Email receipt missing");
   return result.id as string;
+}
+
+async function sendGmail(mail: Mail, id: string) {
+  const user = process.env.GMAIL_USER!;
+  const transport = nodemailer.createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: { user, pass: process.env.GMAIL_APP_PASSWORD!.replace(/\s/g, "") },
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 15000,
+    disableFileAccess: true,
+    disableUrlAccess: true,
+    logger: false,
+    debug: false,
+  });
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      transport.sendMail({
+        from: { name: "Loops", address: user },
+        to: { address: mail.to, name: "" },
+        subject: mail.subject,
+        html: mail.html,
+        text: mail.text,
+        // Useful for tracing, but Gmail does not promise idempotent SMTP sends.
+        messageId: `<loops-${createHash("sha256").update(id).digest("hex")}@${user.split("@")[1]}>`,
+      }),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new EmailError(504, false, true)), 30000);
+      }),
+    ]);
+    if (!result.accepted?.length) throw new EmailError(422, false, false);
+    return result.messageId;
+  } catch (error) {
+    if (error instanceof EmailError) throw error;
+    const smtp = error as { responseCode?: number; command?: string; code?: string; response?: string };
+    // Negative SMTP replies are definite rejections. Keep provider error text,
+    // which can contain recipient addresses, out of logs and public errors.
+    if (smtp.responseCode && smtp.responseCode >= 400) {
+      const temporary = smtp.responseCode < 500 || /5\.4\.5/.test(smtp.response || "");
+      throw new EmailError(temporary ? 429 : 422, temporary, false);
+    }
+    // Nodemailer also labels post-DATA socket failures "CONN", so a generic
+    // connection error does not prove that Gmail received no message.
+    const beforeMessage = smtp.code === "EDNS" || /^(EHLO|HELO|STARTTLS|AUTH|MAIL FROM|RCPT TO)(\b|:)/.test(smtp.command || "");
+    // Never retry an unknown SMTP receipt: Gmail cannot deduplicate it.
+    throw new EmailError(503, beforeMessage, !beforeMessage);
+  } finally {
+    clearTimeout(timeout);
+    transport.close();
+  }
 }
 export const escapeHtml = (value: string) =>
   value.replace(

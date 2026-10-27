@@ -6,6 +6,7 @@ import { changeDocument } from "@/lib/documents";
 import { accountId, matches, sign } from "@/lib/security";
 import { emailConfigured, emailLayout, sendEmail } from "@/lib/email";
 import { sameOrigin } from "@/lib/request";
+export const maxDuration = 60;
 const json = (data: unknown, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 export async function GET() {

@@ -1,5 +1,6 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
+import nodemailer, { type SendMailOptions, type SMTPTransportOptions } from "nodemailer";
 import {
   claimEmail,
   publishAndQueue,
@@ -13,7 +14,7 @@ import {
   type Loop,
 } from "../src/lib/model";
 import { seal, unseal, safeNext } from "../src/lib/security";
-import { sendEmail, EmailError } from "../src/lib/email";
+import { sendEmail, EmailError, emailConfigured } from "../src/lib/email";
 process.env.AUTH_SECRET = "test-secret-".repeat(5);
 process.env.APP_URL = "https://loops.example.test";
 function fixture(): Loop {
@@ -243,5 +244,104 @@ test("provider requests include idempotency key; errors never become successful 
     globalThis.fetch = original;
     delete process.env.RESEND_API_KEY;
     delete process.env.EMAIL_FROM;
+  }
+});
+
+test("Gmail sends through authenticated TLS and preserves newsletter content without requiring a domain", async () => {
+  process.env.EMAIL_PROVIDER = "gmail";
+  process.env.GMAIL_USER = "loops-test@gmail.com";
+  process.env.GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop";
+  const originalCreate = nodemailer.createTransport;
+  const captured: Buffer[] = [];
+  const intercepted = mock.method(nodemailer, "createTransport", (options: SMTPTransportOptions) => {
+    assert.equal(options.host, "smtp.gmail.com");
+    assert.equal(options.secure, true);
+    assert.equal(options.auth?.user, process.env.GMAIL_USER);
+    assert.equal(options.auth?.pass, "abcdefghijklmnop");
+    assert.equal(options.disableFileAccess, true);
+    assert.equal(options.disableUrlAccess, true);
+    const stream = originalCreate({ streamTransport: true, buffer: true });
+    return {
+      async sendMail(mail: SendMailOptions) {
+        const result = await stream.sendMail(mail);
+        captured.push(result.message as Buffer);
+        assert.equal(result.envelope.from, process.env.GMAIL_USER);
+        assert.deepEqual(result.envelope.to, ["friend@example.test"]);
+        return { messageId: result.messageId, accepted: result.envelope.to };
+      },
+      close() { stream.close(); },
+    } as unknown as ReturnType<typeof nodemailer.createTransport>;
+  });
+  try {
+    assert.equal(emailConfigured(), true);
+    const mail = { to: "friend@example.test", subject: "A new Loops issue", text: "Hello from our loop", html: '<p>Hello from our loop</p><img src="https://loops.example.test/photo">' };
+    const first = await sendEmail(mail, "same-job");
+    assert.equal(await sendEmail(mail, "same-job"), first);
+    assert.ok(captured[0].toString().includes("multipart/alternative"));
+    assert.ok(captured[0].toString().includes("Hello from our loop"));
+    assert.ok(captured[0].toString().includes("https://loops.example.test/photo"));
+    delete process.env.GMAIL_APP_PASSWORD;
+    assert.equal(emailConfigured(), false);
+  } finally {
+    intercepted.mock.restore();
+    delete process.env.EMAIL_PROVIDER;
+    delete process.env.GMAIL_USER;
+    delete process.env.GMAIL_APP_PASSWORD;
+  }
+});
+
+test("Gmail retries definite temporary rejections but never repeats an ambiguous SMTP delivery", async () => {
+  process.env.EMAIL_PROVIDER = "gmail";
+  process.env.GMAIL_USER = "loops-test@gmail.com";
+  process.env.GMAIL_APP_PASSWORD = "abcdefghijklmnop";
+  let failure: object = { responseCode: 421, command: "DATA" };
+  const intercepted = mock.method(nodemailer, "createTransport", () => ({
+    async sendMail() { throw failure; },
+    close() {},
+  }) as unknown as ReturnType<typeof nodemailer.createTransport>);
+  const mail = { to: "friend@example.test", subject: "Test", html: "Test", text: "Test" };
+  try {
+    await assert.rejects(() => sendEmail(mail, "retry"),
+      (e: unknown) => e instanceof EmailError && e.retryable && !e.uncertain);
+    failure = { code: "EDNS", command: "CONN" };
+    await assert.rejects(() => sendEmail(mail, "connect"),
+      (e: unknown) => e instanceof EmailError && e.retryable && !e.uncertain);
+    failure = { code: "ECONNECTION", command: "CONN" };
+    await assert.rejects(() => sendEmail(mail, "ambiguous"),
+      (e: unknown) => e instanceof EmailError && !e.retryable && e.uncertain);
+    failure = { responseCode: 535, command: "AUTH PLAIN" };
+    await assert.rejects(() => sendEmail(mail, "invalid-password"),
+      (e: unknown) => e instanceof EmailError && !e.retryable && !e.uncertain);
+
+    const loop = fixture();
+    queueForms(loop, now);
+    claimEmail(loop, now, "gmail-a");
+    claimEmail(loop, now, "gmail-b");
+    assert.equal(claimEmail(loop, new Date(now.getTime() + 2 * 60000), "retry"), null);
+    assert.ok(loop.outbox!.every(job => job.status === "failed"));
+    const delayed = fixture();
+    queueForms(delayed, now);
+    const claimed = claimEmail(delayed, now, "first")!;
+    delayed.outbox![0].status = "pending"; // definite SMTP rejection, safe to retry
+    assert.equal(claimEmail(delayed, new Date(now.getTime() + 2 * 60000), "again")!.id, claimed.id);
+  } finally {
+    intercepted.mock.restore();
+    delete process.env.EMAIL_PROVIDER;
+    delete process.env.GMAIL_USER;
+    delete process.env.GMAIL_APP_PASSWORD;
+  }
+});
+
+test("switching mail providers cannot resend a previously attempted job", () => {
+  const loop = fixture();
+  queueForms(loop, now);
+  claimEmail(loop, now, "resend-a");
+  claimEmail(loop, now, "resend-b");
+  process.env.EMAIL_PROVIDER = "gmail";
+  try {
+    assert.equal(claimEmail(loop, new Date(now.getTime() + 2 * 60000), "gmail"), null);
+    assert.ok(loop.outbox!.every(job => job.status === "failed"));
+  } finally {
+    delete process.env.EMAIL_PROVIDER;
   }
 });

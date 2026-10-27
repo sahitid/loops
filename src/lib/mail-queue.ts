@@ -12,6 +12,7 @@ import {
   appUrl,
   emailButton,
   emailConfigured,
+  emailProvider,
   emailLayout,
   escapeHtml,
   sendEmail,
@@ -252,6 +253,18 @@ export function claimEmail(
       continue;
     }
     if (loop.paused && job.kind !== "invitation") continue;
+    const provider = emailProvider();
+    if (!provider) return null;
+    // Old jobs with attempts predate Gmail support and used Resend.
+    const previousProvider = job.deliveryProvider || (job.attempts ? "resend" : undefined);
+    if (
+      (previousProvider && previousProvider !== provider) ||
+      (provider === "gmail" && (job.status === "sending" || job.uncertain))
+    ) {
+      job.status = "failed";
+      job.error = "Receipt needs review; automatic retry stopped to avoid duplicate emails.";
+      continue;
+    }
     // Resend remembers idempotency keys for 24 hours. Never repeat an ambiguous send outside that window.
     if (
       job.firstAttemptAt &&
@@ -263,6 +276,7 @@ export function claimEmail(
       continue;
     }
     job.status = "sending";
+    job.deliveryProvider = provider;
     job.claim = claim;
     job.leaseUntil = new Date(now.getTime() + 60000).toISOString();
     job.firstAttemptAt ||= now.toISOString();
@@ -278,7 +292,7 @@ export async function dispatchEmails(
   if (!emailConfigured()) return { sent: 0, failed: 0 };
   let sent = 0,
     failed = 0;
-  while (Date.now() < deadline - 16000) {
+  while (Date.now() < deadline - 31000) {
     const claim = crypto.randomUUID();
     const { result: job } = await updateLoop(id, (loop) =>
       claimEmail(loop, new Date(), claim),
@@ -315,8 +329,8 @@ export async function dispatchEmails(
         current.nextAttemptAt = new Date(
           Date.now() + (definite && e.status === 429 ? 3600000 : 60000),
         ).toISOString();
-        current.uncertain ||= !definite || (definite && e.status >= 500);
-        if (definite && e.status === 429 && !current.uncertain)
+        current.uncertain ||= !definite || e.uncertain;
+        if (definite && !e.uncertain && !current.uncertain)
           delete current.firstAttemptAt;
       });
     }
